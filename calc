@@ -1,0 +1,1271 @@
+import React, { useState, useEffect } from 'react';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Info, AlertTriangle, CheckCircle, Calendar, Pill } from 'lucide-react';
+
+const ToxicityManagementSystem = () => {
+  const [mode, setMode] = useState(null);
+  const [selectedOrgan, setSelectedOrgan] = useState('');
+  const [selectedToxicity, setSelectedToxicity] = useState('');
+  const [selectedGrade, setSelectedGrade] = useState('');
+  const [showRecommendation, setShowRecommendation] = useState(false);
+  
+  // Calculadora estados
+  const [currentDose, setCurrentDose] = useState({ breakfast: '', lunch: '', dinner: '', total: '' });
+  const [weeksToTaper, setWeeksToTaper] = useState('');
+  const [weeklyReduction, setWeeklyReduction] = useState('');
+  const [taperSchedule, setTaperSchedule] = useState(null);
+  const [selectedCorticoid, setSelectedCorticoid] = useState('prednisona');
+  const [patientWeight, setPatientWeight] = useState('');
+  const [librariesLoaded, setLibrariesLoaded] = useState(false);
+
+  // Cargar librerías para generación de documentos
+  useEffect(() => {
+    const loadLibraries = () => {
+      const checkInterval = setInterval(() => {
+        if (window.jspdf && window.docx) {
+          setLibrariesLoaded(true);
+          clearInterval(checkInterval);
+        }
+      }, 500);
+      
+      setTimeout(() => {
+        setLibrariesLoaded(true);
+        clearInterval(checkInterval);
+      }, 3000);
+      
+      if (!window.jspdf) {
+        const jspdfScript = document.createElement('script');
+        jspdfScript.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+        jspdfScript.async = true;
+        document.head.appendChild(jspdfScript);
+      }
+      
+      if (!window.docx) {
+        const docxScript = document.createElement('script');
+        docxScript.src = 'https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.min.js';
+        docxScript.async = true;
+        document.head.appendChild(docxScript);
+      }
+    };
+    
+    loadLibraries();
+  }, []);
+
+  // Equivalencias de corticoides
+  const corticoidEquivalence = {
+    prednisona: {
+      name: 'Prednisona',
+      commercial: 'Dacortin®',
+      factor: 1,
+      availableDoses: 'Comprimidos: 2.5 mg, 5 mg, 10 mg, 30 mg (fraccionables en 15 mg y 10 mg)',
+      presentations: [2.5, 5, 10, 15, 30]
+    },
+    metilprednisolona: {
+      name: 'Metilprednisolona',
+      commercial: 'Urbason®',
+      factor: 0.8,
+      availableDoses: 'Comprimidos: 4 mg, 16 mg, 40 mg',
+      presentations: [4, 16, 40]
+    },
+    dexametasona: {
+      name: 'Dexametasona',
+      commercial: 'Fortecortin®',
+      factor: 0.15,
+      availableDoses: 'Comprimidos: 0.5 mg, 0.75 mg, 1 mg, 4 mg',
+      presentations: [0.5, 0.75, 1, 4]
+    }
+  };
+
+  // Órganos y toxicidades según ESMO
+  const organSystems = {
+    'Cutáneo': [
+      'Rash maculopapular',
+      'Prurito',
+      'Dermatitis bullosa',
+      'Eritema multiforme',
+      'Vitíligo'
+    ],
+    'Gastrointestinal': [
+      'Diarrea/Colitis/Enterocolitis',
+      'Gastritis',
+      'Colitis microscópica',
+      'Perforación intestinal'
+    ],
+    'Hepático': [
+      'Hepatitis'
+    ],
+    'Pancreático': [
+      'Pancreatitis',
+      'Elevación de lipasa asintomática'
+    ],
+    'Pulmonar': [
+      'Neumonitis'
+    ],
+    'Endocrino': [
+      'Hipofisitis',
+      'Tiroiditis',
+      'Insuficiencia suprarrenal primaria',
+      'Diabetes mellitus'
+    ],
+    'Renal': [
+      'Nefritis intersticial aguda'
+    ],
+    'Cardiovascular': [
+      'Miocarditis'
+    ],
+    'Neurológico': [
+      'Encefalitis',
+      'Meningitis aséptica',
+      'Mielitis',
+      'Neuropatía periférica',
+      'Miastenia gravis',
+      'Síndrome de Guillain-Barré'
+    ],
+    'Reumatológico': [
+      'Artritis',
+      'Polimialgia reumática',
+      'Miositis'
+    ],
+    'Hematológico': [
+      'Anemia hemolítica autoinmune',
+      'Trombocitopenia',
+      'Neutropenia',
+      'Linfohistiocitosis hemofagocítica'
+    ],
+    'Ocular': [
+      'Uveítis',
+      'Escleritis',
+      'Queratitis'
+    ]
+  };
+
+  // Descripciones de grados según ESMO/CTCAE v5.0
+  const toxicityGrades = {
+    'G1': {
+      description: 'Asintomático o síntomas leves; solo observación clínica; intervención no indicada',
+      action: 'Puede continuar inmunoterapia con monitorización'
+    },
+    'G2': {
+      description: 'Síntomas moderados; intervención médica indicada; limita actividades instrumentales de la vida diaria',
+      action: 'Interrumpir temporalmente inmunoterapia'
+    },
+    'G3': {
+      description: 'Síntomas severos o médicamente significativos; hospitalización posible; limita el autocuidado de la vida diaria',
+      action: 'Suspender inmunoterapia'
+    },
+    'G4': {
+      description: 'Consecuencias potencialmente mortales; intervención urgente indicada',
+      action: 'Suspender permanentemente inmunoterapia'
+    }
+  };
+
+  // Recomendaciones específicas por toxicidad y grado
+  const getDetailedRecommendation = () => {
+    const recommendations = {
+      'Gastrointestinal': {
+        'Diarrea/Colitis/Enterocolitis': {
+          'G1': {
+            corticoid: 'No indicado inicialmente',
+            labValues: null,
+            management: 'Dieta baja en fibra, loperamida',
+            monitoring: 'Control semanal de síntomas',
+            ici: 'Continuar con monitorización'
+          },
+          'G2': {
+            corticoid: 'Prednisona (Dacortin®) 40-60 mg/día VO',
+            labValues: null,
+            management: 'Si no mejora en 3-5 días: considerar infliximab o vedolizumab',
+            monitoring: 'Colonoscopia si persistente. Calprotectina fecal',
+            ici: 'Interrumpir temporalmente',
+            taper: '4-6 semanas'
+          },
+          'G3': {
+            corticoid: 'Metilprednisolona (Urbason®) 1-2 mg/kg/día IV',
+            labValues: null,
+            management: 'Hospitalización. Infliximab 5 mg/kg si corticorrefractario',
+            monitoring: 'Colonoscopia urgente. Cultivo C. difficile, CMV',
+            ici: 'Suspender',
+            taper: '6-8 semanas'
+          },
+          'G4': {
+            corticoid: 'Metilprednisolona (Urbason®) 2 mg/kg/día IV',
+            labValues: null,
+            management: 'UCI. Infliximab precoz. Descartar megacolon/perforación',
+            monitoring: 'TC abdominal. Valorar cirugía',
+            ici: 'Suspender permanentemente',
+            taper: '≥8 semanas'
+          }
+        }
+      },
+      'Hepático': {
+        'Hepatitis': {
+          'G1': {
+            corticoid: 'No indicado',
+            labValues: 'AST/ALT: 1-3× LSN',
+            management: 'Monitorización semanal. Descartar otras causas',
+            monitoring: 'AST, ALT, bilirrubina cada 1-2 semanas',
+            ici: 'Continuar con precaución'
+          },
+          'G2': {
+            corticoid: 'Prednisona (Dacortin®) 0.5-1 mg/kg/día si persistente',
+            labValues: 'AST/ALT: 3-5× LSN',
+            management: 'Suspender hepatotóxicos. Considerar biopsia hepática',
+            monitoring: 'Transaminasas 2x/semana',
+            ici: 'Interrumpir temporalmente',
+            taper: '4-6 semanas'
+          },
+          'G3': {
+            corticoid: 'Prednisona (Dacortin®) 1-2 mg/kg/día',
+            labValues: 'AST/ALT: 5-20× LSN, o Bilirrubina: 3-10× LSN',
+            management: 'Hospitalización. Si no respuesta en 48-72h: MMF o Tocilizumab',
+            monitoring: 'Biopsia hepática. TP, Factor V, bilirrubina diaria',
+            ici: 'Suspender',
+            taper: '6-8 semanas'
+          },
+          'G4': {
+            corticoid: 'Metilprednisolona (Urbason®) 2 mg/kg/día IV',
+            labValues: 'AST/ALT: >20× LSN, o Bilirrubina: >10× LSN',
+            management: 'UCI. Considerar trasplante hepático si fallo fulminante',
+            monitoring: 'Función hepática cada 6-12h',
+            ici: 'Suspender permanentemente',
+            taper: 'Prolongado'
+          }
+        }
+      },
+      'Pancreático': {
+        'Pancreatitis': {
+          'G1': {
+            corticoid: 'No indicado',
+            labValues: 'Lipasa/Amilasa: 1-2× LSN, asintomático',
+            management: 'Dieta normal. Monitorización',
+            monitoring: 'Lipasa, amilasa semanal',
+            ici: 'Continuar con precaución'
+          },
+          'G2': {
+            corticoid: 'Prednisona (Dacortin®) 0.5-1 mg/kg/día si persistente',
+            labValues: 'Lipasa/Amilasa: >2-5× LSN, dolor abdominal moderado',
+            management: 'Dieta absoluta 24-48h. Analgesia. TC abdominal',
+            monitoring: 'Lipasa, amilasa diarias',
+            ici: 'Interrumpir temporalmente',
+            taper: '4-6 semanas'
+          },
+          'G3': {
+            corticoid: 'Metilprednisolona (Urbason®) 1-2 mg/kg/día IV',
+            labValues: 'Lipasa/Amilasa: >5× LSN, dolor intenso, íleo',
+            management: 'Hospitalización. NPO. Fluidos IV. TC. Considerar CPRE',
+            monitoring: 'Lipasa, amilasa, calcio, LDH diarias',
+            ici: 'Suspender',
+            taper: '6-8 semanas'
+          },
+          'G4': {
+            corticoid: 'Metilprednisolona (Urbason®) 2 mg/kg/día IV',
+            labValues: 'Pancreatitis necrotizante, shock, fallo multiorgánico',
+            management: 'UCI. Soporte hemodinámico. Considerar necrosectomía',
+            monitoring: 'TC con contraste. Monitorización intensiva',
+            ici: 'Suspender permanentemente',
+            taper: 'Muy prolongado'
+          }
+        }
+      },
+      'Renal': {
+        'Nefritis intersticial aguda': {
+          'G1': {
+            corticoid: 'No indicado',
+            labValues: 'Creatinina: 1.5-2× basal, o FG 50-80 ml/min',
+            management: 'Suspender nefrotóxicos. Monitorización',
+            monitoring: 'Creatinina, iones cada 2-3 días',
+            ici: 'Continuar con precaución'
+          },
+          'G2': {
+            corticoid: 'Prednisona (Dacortin®) 1 mg/kg/día',
+            labValues: 'Creatinina: 2-3× basal, o FG 25-50 ml/min (KDIGO 2)',
+            management: 'Suspender nefrotóxicos. Considerar biopsia renal',
+            monitoring: 'Creatinina, iones, sedimento urinario',
+            ici: 'Interrumpir temporalmente',
+            taper: '8-12 semanas'
+          },
+          'G3': {
+            corticoid: 'Metilprednisolona (Urbason®) 250-500 mg IV x 3 días',
+            labValues: 'Creatinina: >3× basal, o FG <25 ml/min (KDIGO 3)',
+            management: 'Biopsia renal. Si refractario: MMF, ciclofosfamida o rituximab',
+            monitoring: 'Función renal diaria. Considerar diálisis',
+            ici: 'Suspender',
+            taper: '8-12 semanas'
+          },
+          'G4': {
+            corticoid: 'Metilprednisolona (Urbason®) 500-1000 mg IV x 3 días',
+            labValues: 'Insuficiencia renal aguda que requiere diálisis',
+            management: 'UCI. Diálisis urgente. Inmunosupresión 2ª línea precoz',
+            monitoring: 'Diálisis. Función renal horaria',
+            ici: 'Suspender permanentemente',
+            taper: 'Muy prolongado'
+          }
+        }
+      },
+      'Pulmonar': {
+        'Neumonitis': {
+          'G1': {
+            corticoid: 'No indicado si asintomático',
+            labValues: null,
+            management: 'TC torácico. Descartar infección/progresión',
+            monitoring: 'TC cada 2-4 semanas',
+            ici: 'Puede continuar con monitorización'
+          },
+          'G2': {
+            corticoid: 'Prednisona (Dacortin®) 1 mg/kg/día',
+            labValues: null,
+            management: 'TC torácico. Descartar infección',
+            monitoring: 'Función pulmonar. TC a las 48-72h',
+            ici: 'Interrumpir',
+            taper: '4-6 semanas'
+          },
+          'G3': {
+            corticoid: 'Metilprednisolona (Urbason®) 1-2 mg/kg/día IV',
+            labValues: null,
+            management: 'Hospitalización. Si no mejora: Tocilizumab o Infliximab',
+            monitoring: 'Oxigenoterapia. TC cada 48-72h',
+            ici: 'Suspender',
+            taper: '6-8 semanas'
+          },
+          'G4': {
+            corticoid: 'Metilprednisolona (Urbason®) 2 mg/kg/día IV',
+            labValues: null,
+            management: 'UCI. Ventilación mecánica. Inmunosupresión 2ª línea',
+            monitoring: 'Gasometría. Rx/TC frecuente',
+            ici: 'Suspender permanentemente',
+            taper: 'Prolongado'
+          }
+        }
+      },
+      'Hematológico': {
+        'Anemia hemolítica autoinmune': {
+          'G1': {
+            corticoid: 'No indicado inicialmente',
+            labValues: 'Hemoglobina: 10-12 g/dl, Coombs directo positivo',
+            management: 'Monitorización. Ácido fólico',
+            monitoring: 'Hemoglobina, reticulocitos, bilirrubina, LDH',
+            ici: 'Puede continuar con precaución'
+          },
+          'G2': {
+            corticoid: 'Prednisona (Dacortin®) 1 mg/kg/día',
+            labValues: 'Hemoglobina: 8-10 g/dl, Reticulocitos elevados',
+            management: 'Test de Coombs. Transfusión si precisa',
+            monitoring: 'Hemoglobina, reticulocitos, haptoglobina',
+            ici: 'Interrumpir',
+            taper: '6-8 semanas'
+          },
+          'G3': {
+            corticoid: 'Metilprednisolona (Urbason®) 1-2 mg/kg/día + IGIV',
+            labValues: 'Hemoglobina: <8 g/dl, Hemólisis severa',
+            management: 'IGIV 1 g/kg/día x 2. Rituximab si refractario',
+            monitoring: 'Hemograma diario',
+            ici: 'Suspender',
+            taper: 'Prolongado'
+          },
+          'G4': {
+            corticoid: 'Metilprednisolona (Urbason®) 2 mg/kg/día IV + IGIV',
+            labValues: 'Hemoglobina: <6.5 g/dl, Compromiso vital',
+            management: 'UCI. Transfusión urgente. IGIV + Rituximab',
+            monitoring: 'Hemograma cada 6h. Soporte transfusional',
+            ici: 'Suspender permanentemente',
+            taper: 'Muy prolongado'
+          }
+        },
+        'Trombocitopenia': {
+          'G1': {
+            corticoid: 'No indicado',
+            labValues: 'Plaquetas: 75,000-150,000/μl',
+            management: 'Monitorización. Descartar otras causas',
+            monitoring: 'Plaquetas 2x/semana',
+            ici: 'Continuar con precaución'
+          },
+          'G2': {
+            corticoid: 'Prednisona (Dacortin®) 1 mg/kg/día',
+            labValues: 'Plaquetas: 50,000-75,000/μl',
+            management: 'Descartar causas centrales. IGIV si sangrado',
+            monitoring: 'Plaquetas 2-3x/semana',
+            ici: 'Interrumpir',
+            taper: '6-8 semanas'
+          },
+          'G3': {
+            corticoid: 'Metilprednisolona (Urbason®) 1-2 mg/kg/día + IGIV',
+            labValues: 'Plaquetas: 25,000-50,000/μl',
+            management: 'IGIV 1 g/kg/día x 2. Eltrombopag si refractario',
+            monitoring: 'Plaquetas diarias. Vigilar sangrado',
+            ici: 'Suspender',
+            taper: 'Prolongado'
+          },
+          'G4': {
+            corticoid: 'Metilprednisolona (Urbason®) 2 mg/kg/día IV + IGIV',
+            labValues: 'Plaquetas: <25,000/μl con sangrado activo',
+            management: 'UCI. IGIV urgente. Transfusión plaquetaria',
+            monitoring: 'Plaquetas cada 6h. Control de sangrado',
+            ici: 'Suspender permanentemente',
+            taper: 'Muy prolongado'
+          }
+        }
+      },
+      'Cardiovascular': {
+        'Miocarditis': {
+          'G2': {
+            corticoid: 'Metilprednisolona (Urbason®) 500-1000 mg IV',
+            labValues: 'Troponina elevada, ECG alterado',
+            management: 'Hospitalización urgente. RM cardíaca. Monitorización',
+            monitoring: 'Troponina, ECG, ecocardiografía',
+            ici: 'Suspender inmediatamente',
+            taper: '6-8 semanas'
+          },
+          'G3': {
+            corticoid: 'Metilprednisolona (Urbason®) 1000 mg IV + IGIV',
+            labValues: 'Troponina muy elevada, arritmias, FE reducida',
+            management: 'UCI. IGIV. Infliximab o Abatacept si refractario',
+            monitoring: 'Monitorización continua. Ecocardiografía diaria',
+            ici: 'Suspender permanentemente',
+            taper: '≥8 semanas'
+          },
+          'G4': {
+            corticoid: 'Metilprednisolona (Urbason®) 1000 mg IV + inmunosupresión múltiple',
+            labValues: 'Shock cardiogénico, arritmias mortales',
+            management: 'UCI. Soporte inotrópico. ECMO si precisa',
+            monitoring: 'Monitorización invasiva continua',
+            ici: 'Contraindicado permanentemente',
+            taper: 'Muy prolongado'
+          }
+        }
+      }
+    };
+
+    if (!selectedOrgan || !selectedToxicity || !selectedGrade) return null;
+    
+    return recommendations[selectedOrgan]?.[selectedToxicity]?.[selectedGrade] || null;
+  };
+
+  const recommendation = getDetailedRecommendation();
+
+  // Funciones de calculadora
+  const calculateTotalDose = () => {
+    const total = parseFloat(currentDose.breakfast || 0) + 
+                  parseFloat(currentDose.lunch || 0) + 
+                  parseFloat(currentDose.dinner || 0);
+    setCurrentDose({...currentDose, total: total.toFixed(1)});
+  };
+
+  const distributeDose = (totalMg) => {
+    // Distribución: 50% desayuno, 35% comida, 15% cena
+    let breakfast = totalMg * 0.50;
+    let lunch = totalMg * 0.35;
+    let dinner = totalMg * 0.15;
+    
+    return { breakfast, lunch, dinner };
+  };
+
+  const roundToAvailableDoses = (mg, corticoid) => {
+    const presentations = corticoidEquivalence[corticoid].presentations;
+    
+    if (mg === 0) return { total: 0, pills: [] };
+    
+    let remaining = mg;
+    const pills = [];
+    
+    const sortedDoses = [...presentations].sort((a, b) => b - a);
+    
+    for (const dose of sortedDoses) {
+      while (remaining >= dose - 0.1) {
+        pills.push(`${dose}mg`);
+        remaining -= dose;
+      }
+    }
+    
+    const actualTotal = pills.reduce((sum, pill) => {
+      return sum + parseFloat(pill);
+    }, 0);
+    
+    return { 
+      total: Math.round(actualTotal * 10) / 10, 
+      pills: pills.length > 0 ? pills : ['Sin toma']
+    };
+  };
+
+  const calculateTaper = () => {
+    if (!currentDose.total || !weeksToTaper || !weeklyReduction) {
+      alert('Por favor completa todos los campos');
+      return;
+    }
+
+    const schedule = [];
+    let currentTotal = parseFloat(currentDose.total);
+    const reduction = parseFloat(weeklyReduction);
+    const weeks = parseInt(weeksToTaper);
+
+    for (let week = 1; week <= weeks; week++) {
+      if (currentTotal <= 0) break;
+      
+      const distribution = distributeDose(currentTotal);
+      
+      const weekSchedule = {
+        week,
+        totalPrednisone: currentTotal
+      };
+
+      // Calcular para cada corticoide
+      Object.keys(corticoidEquivalence).forEach(corticoid => {
+        const factor = corticoidEquivalence[corticoid].factor;
+        const equivalentTotal = currentTotal * factor;
+        const equivalentDist = distributeDose(equivalentTotal);
+        
+        weekSchedule[corticoid] = {
+          breakfast: roundToAvailableDoses(equivalentDist.breakfast, corticoid),
+          lunch: roundToAvailableDoses(equivalentDist.lunch, corticoid),
+          dinner: roundToAvailableDoses(equivalentDist.dinner, corticoid),
+          actualTotal: equivalentTotal
+        };
+      });
+
+      schedule.push(weekSchedule);
+      currentTotal -= reduction;
+    }
+
+    setTaperSchedule(schedule);
+  };
+
+  const generatePDF = () => {
+    if (!taperSchedule) return;
+    
+    if (!window.jspdf) {
+      alert('Las librerías aún se están cargando. Espera unos segundos.');
+      return;
+    }
+    
+    try {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      
+      let yPos = 20;
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const margin = 15;
+      
+      // Título
+      doc.setFontSize(16);
+      doc.setTextColor(0, 0, 0);
+      doc.text('CALENDARIO DE DESCENSO DE CORTICOIDES', pageWidth / 2, yPos, { align: 'center' });
+      yPos += 10;
+      
+      doc.setFontSize(12);
+      const corticoidName = corticoidEquivalence[selectedCorticoid].name;
+      const commercialName = corticoidEquivalence[selectedCorticoid].commercial;
+      doc.text(`${corticoidName} (${commercialName})`, pageWidth / 2, yPos, { align: 'center' });
+      yPos += 6;
+      
+      doc.setFontSize(9);
+      const presentations = corticoidEquivalence[selectedCorticoid].availableDoses;
+      doc.text(presentations, pageWidth / 2, yPos, { align: 'center' });
+      yPos += 15;
+      
+      // Calendario
+      taperSchedule.forEach((week, index) => {
+        const dist = week[selectedCorticoid];
+        
+        if (yPos > 240) {
+          doc.addPage();
+          yPos = 20;
+        }
+        
+        doc.setFontSize(11);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`Semana ${week.week}`, margin, yPos);
+        yPos += 8;
+        
+        // Tabla simple
+        const startX = margin;
+        const colWidth = 45;
+        const rowHeight = 10;
+        
+        doc.setFont('helvetica', 'bold');
+        doc.setFillColor(230, 231, 235);
+        doc.rect(startX, yPos, colWidth, rowHeight, 'F');
+        doc.rect(startX + colWidth, yPos, colWidth, rowHeight, 'F');
+        doc.rect(startX + colWidth*2, yPos, colWidth, rowHeight, 'F');
+        doc.rect(startX + colWidth*3, yPos, colWidth, rowHeight, 'F');
+        
+        doc.setFontSize(12);
+        doc.text('', startX + 3, yPos + 7);
+        doc.text('Desayuno', startX + colWidth + 15, yPos + 7);
+        doc.text('Comida', startX + colWidth*2 + 15, yPos + 7);
+        doc.text('Cena', startX + colWidth*3 + 20, yPos + 7);
+        yPos += rowHeight;
+        
+        // Fila Dosis
+        doc.setFont('helvetica', 'bold');
+        doc.setFillColor(243, 244, 246);
+        doc.rect(startX, yPos, colWidth, rowHeight, 'F');
+        doc.text('Dosis', startX + 3, yPos + 7);
+        
+        doc.setFont('helvetica', 'normal');
+        doc.rect(startX + colWidth, yPos, colWidth, rowHeight);
+        doc.text(`${dist.breakfast.total} mg`, startX + colWidth + 17, yPos + 7);
+        doc.rect(startX + colWidth*2, yPos, colWidth, rowHeight);
+        doc.text(`${dist.lunch.total} mg`, startX + colWidth*2 + 17, yPos + 7);
+        doc.rect(startX + colWidth*3, yPos, colWidth, rowHeight);
+        doc.text(`${dist.dinner.total} mg`, startX + colWidth*3 + 20, yPos + 7);
+        yPos += rowHeight;
+        
+        // Fila Comprimidos
+        doc.setFont('helvetica', 'bold');
+        doc.setFillColor(243, 244, 246);
+        doc.rect(startX, yPos, colWidth, rowHeight, 'F');
+        doc.text('Comprimidos', startX + 3, yPos + 7);
+        
+        doc.setFont('helvetica', 'normal');
+        doc.rect(startX + colWidth, yPos, colWidth, rowHeight);
+        doc.text(dist.breakfast.pills.join('+') || 'Sin toma', startX + colWidth + 10, yPos + 7);
+        doc.rect(startX + colWidth*2, yPos, colWidth, rowHeight);
+        doc.text(dist.lunch.pills.join('+') || 'Sin toma', startX + colWidth*2 + 10, yPos + 7);
+        doc.rect(startX + colWidth*3, yPos, colWidth, rowHeight);
+        doc.text(dist.dinner.pills.join('+') || 'Sin toma', startX + colWidth*3 + 12, yPos + 7);
+        yPos += rowHeight + 8;
+      });
+      
+      // Nueva página para advertencias
+      doc.addPage();
+      yPos = 20;
+      
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('TRATAMIENTO PROFILÁCTICO (en caso de empleo de corticoides)', margin, yPos);
+      yPos += 8;
+      
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text('• Omeprazol 20-40 mg/día durante TODO el tratamiento', margin, yPos);
+      yPos += 6;
+      doc.text('• Septrim Forte: Lunes-Miércoles-Viernes (si ≥20mg/día >4 semanas)', margin, yPos);
+      yPos += 6;
+      doc.text('• Calcio 1200 mg/día + Vitamina D 800-2000 UI/día', margin, yPos);
+      yPos += 12;
+      
+      doc.setFont('helvetica', 'bold');
+      doc.text('NUNCA suspender bruscamente', margin, yPos);
+      yPos += 15;
+      
+      // Disclaimer PRIMERO
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'italic');
+      const disclaimer = 'IMPORTANTE: La información aquí contenida debe ser corroborada y confirmada por un médico con experiencia en el manejo de las toxicidades inmunomediadas.';
+      const lines = doc.splitTextToSize(disclaimer, pageWidth - 2*margin);
+      doc.text(lines, pageWidth / 2, yPos, { align: 'center' });
+      yPos += lines.length * 5 + 5;
+      
+      // Autoría DESPUÉS
+      doc.setFont('helvetica', 'bold');
+      doc.text('Elaborado con Claude, por Joaquín Gimeno.', pageWidth / 2, yPos, { align: 'center' });
+      yPos += 5;
+      doc.setFont('helvetica', 'normal');
+      doc.text('Basado en guías ESMO 2022 y NCCN 2026', pageWidth / 2, yPos, { align: 'center' });
+      
+      doc.save(`calendario_descenso_${selectedCorticoid}.pdf`);
+      
+    } catch (error) {
+      console.error('Error generando PDF:', error);
+      alert('Error al generar el PDF.');
+    }
+  };
+
+  const generateWordDoc = () => {
+    if (!taperSchedule) return;
+    
+    if (!window.docx) {
+      alert('Las librerías aún se están cargando. Espera unos segundos.');
+      return;
+    }
+    
+    try {
+      const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType } = window.docx;
+      
+      const corticoidName = corticoidEquivalence[selectedCorticoid].name;
+      const commercialName = corticoidEquivalence[selectedCorticoid].commercial;
+      const presentations = corticoidEquivalence[selectedCorticoid].availableDoses;
+      
+      const children = [];
+      
+      // Título
+      children.push(new Paragraph({
+        text: 'CALENDARIO DE DESCENSO DE CORTICOIDES',
+        heading: 'Heading1',
+        alignment: 1
+      }));
+      
+      children.push(new Paragraph({
+        children: [new TextRun({ text: `${corticoidName} (${commercialName})`, size: 24 })],
+        alignment: 1
+      }));
+      
+      children.push(new Paragraph({
+        children: [new TextRun({ text: presentations, size: 18 })],
+        alignment: 1
+      }));
+      
+      children.push(new Paragraph({ text: '' }));
+      
+      // Calendario
+      taperSchedule.forEach(week => {
+        const dist = week[selectedCorticoid];
+        
+        children.push(new Paragraph({
+          text: `Semana ${week.week}`,
+          heading: 'Heading2'
+        }));
+        
+        const table = new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: [
+            new TableRow({
+              children: [
+                new TableCell({ children: [new Paragraph('')] }),
+                new TableCell({ children: [new Paragraph('Desayuno')] }),
+                new TableCell({ children: [new Paragraph('Comida')] }),
+                new TableCell({ children: [new Paragraph('Cena')] })
+              ]
+            }),
+            new TableRow({
+              children: [
+                new TableCell({ children: [new Paragraph({ text: 'Dosis', bold: true })] }),
+                new TableCell({ children: [new Paragraph(`${dist.breakfast.total} mg`)] }),
+                new TableCell({ children: [new Paragraph(`${dist.lunch.total} mg`)] }),
+                new TableCell({ children: [new Paragraph(`${dist.dinner.total} mg`)] })
+              ]
+            }),
+            new TableRow({
+              children: [
+                new TableCell({ children: [new Paragraph({ text: 'Comprimidos', bold: true })] }),
+                new TableCell({ children: [new Paragraph(dist.breakfast.pills.join('+') || 'Sin toma')] }),
+                new TableCell({ children: [new Paragraph(dist.lunch.pills.join('+') || 'Sin toma')] }),
+                new TableCell({ children: [new Paragraph(dist.dinner.pills.join('+') || 'Sin toma')] })
+              ]
+            })
+          ]
+        });
+        
+        children.push(table);
+        children.push(new Paragraph({ text: '' }));
+      });
+      
+      // Advertencias
+      children.push(new Paragraph({ text: '', pageBreakBefore: true }));
+      children.push(new Paragraph({ text: 'TRATAMIENTO PROFILÁCTICO (en caso de empleo de corticoides)', heading: 'Heading2' }));
+      children.push(new Paragraph('• Omeprazol 20-40 mg/día durante TODO el tratamiento'));
+      children.push(new Paragraph('• Septrim Forte: Lunes-Miércoles-Viernes (si ≥20mg/día >4 semanas)'));
+      children.push(new Paragraph('• Calcio 1200 mg/día + Vitamina D 800-2000 UI/día'));
+      children.push(new Paragraph({ text: '' }));
+      children.push(new Paragraph({ text: 'NUNCA suspender bruscamente', heading: 'Heading2' }));
+      children.push(new Paragraph({ text: '' }));
+      
+      // Disclaimer PRIMERO
+      children.push(new Paragraph({
+        children: [new TextRun({
+          text: 'IMPORTANTE: La información aquí contenida debe ser corroborada y confirmada por un médico con experiencia en el manejo de las toxicidades inmunomediadas.',
+          italics: true,
+          bold: true
+        })],
+        alignment: 1
+      }));
+      
+      children.push(new Paragraph({ text: '' }));
+      
+      // Autoría DESPUÉS
+      children.push(new Paragraph({
+        children: [new TextRun({ text: 'Elaborado con Claude, por Joaquín Gimeno.', bold: true })],
+        alignment: 1
+      }));
+      
+      children.push(new Paragraph({
+        text: 'Basado en guías ESMO 2022 y NCCN 2026',
+        alignment: 1
+      }));
+      
+      const doc = new Document({
+        sections: [{ children }]
+      });
+      
+      Packer.toBlob(doc).then(blob => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `calendario_descenso_${selectedCorticoid}.docx`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+      });
+      
+    } catch (error) {
+      console.error('Error generando Word:', error);
+      alert('Error al generar el documento Word.');
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+      <div className="max-w-4xl mx-auto">
+        <Card className="shadow-2xl border-2 border-blue-300">
+          <CardHeader className="bg-gradient-to-r from-blue-600 to-indigo-700 text-white">
+            <CardTitle className="text-center text-3xl font-bold">
+              Sistema de Manejo de Toxicidad Inmunomediada
+            </CardTitle>
+            <p className="text-center text-blue-100 mt-2">
+              Asistente clínico elaborado por el Dr. Joaquín Gimeno
+            </p>
+            <p className="text-center text-blue-100 text-sm">
+              Basado en guías ESMO 2022 y NCCN 2026
+            </p>
+          </CardHeader>
+
+          <CardContent className="p-6">
+            {!mode && (
+              <div className="space-y-4">
+                <Alert className="bg-blue-50 border-2 border-blue-300">
+                  <Info className="h-5 w-5" />
+                  <AlertDescription>
+                    Selecciona el módulo que necesitas utilizar
+                  </AlertDescription>
+                </Alert>
+
+                <div className="grid gap-4">
+                  <button
+                    onClick={() => setMode('toxicity')}
+                    className="p-6 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-lg hover:from-green-600 hover:to-green-700 transition-all shadow-lg hover:shadow-xl"
+                  >
+                    <div className="text-2xl font-bold mb-2">📋 Recomendaciones por Toxicidad</div>
+                    <div className="text-sm opacity-90">
+                      Consulta protocolos específicos según órgano, toxicidad y grado
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => setMode('calculator')}
+                    className="p-6 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-lg hover:from-purple-600 hover:to-purple-700 transition-all shadow-lg hover:shadow-xl"
+                  >
+                    <div className="text-2xl font-bold mb-2">🧮 Calculadora de Descenso</div>
+                    <div className="text-sm opacity-90">
+                      Calcula pautas de descenso y genera calendarios para el paciente
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {mode === 'toxicity' && (
+              <div className="space-y-4">
+                <button
+                  onClick={() => {
+                    setMode(null);
+                    setSelectedOrgan('');
+                    setSelectedToxicity('');
+                    setSelectedGrade('');
+                    setShowRecommendation(false);
+                  }}
+                  className="mb-4 px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
+                >
+                  ← Volver al menú principal
+                </button>
+
+                <div className="bg-gradient-to-r from-green-50 to-green-100 p-4 rounded-lg border-2 border-green-300">
+                  <label className="block font-semibold mb-2 text-green-900">
+                    🏥 Paso 1: Selecciona el órgano/sistema afectado
+                  </label>
+                  <select
+                    value={selectedOrgan}
+                    onChange={(e) => {
+                      setSelectedOrgan(e.target.value);
+                      setSelectedToxicity('');
+                      setSelectedGrade('');
+                      setShowRecommendation(false);
+                    }}
+                    className="w-full p-3 border-2 border-green-300 rounded-lg focus:ring-2 focus:ring-green-500"
+                  >
+                    <option value="">-- Selecciona un órgano/sistema --</option>
+                    {Object.keys(organSystems).map(organ => (
+                      <option key={organ} value={organ}>{organ}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {selectedOrgan && (
+                  <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-4 rounded-lg border-2 border-blue-300">
+                    <label className="block font-semibold mb-2 text-blue-900">
+                      🔬 Paso 2: Selecciona el tipo de toxicidad
+                    </label>
+                    <select
+                      value={selectedToxicity}
+                      onChange={(e) => {
+                        setSelectedToxicity(e.target.value);
+                        setSelectedGrade('');
+                        setShowRecommendation(false);
+                      }}
+                      className="w-full p-3 border-2 border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">-- Selecciona una toxicidad --</option>
+                      {organSystems[selectedOrgan].map(tox => (
+                        <option key={tox} value={tox}>{tox}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {selectedToxicity && (
+                  <div className="bg-gradient-to-r from-orange-50 to-orange-100 p-4 rounded-lg border-2 border-orange-300">
+                    <label className="block font-semibold mb-3 text-orange-900">
+                      ⚠️ Paso 3: Determina el grado de toxicidad (CTCAE v5.0)
+                    </label>
+                    <div className="space-y-3">
+                      {Object.entries(toxicityGrades).map(([grade, info]) => {
+                        const rec = getDetailedRecommendation();
+                        const gradeRec = rec?.labValues || null;
+                        
+                        return (
+                          <div 
+                            key={grade} 
+                            className={`border-2 rounded-lg p-4 cursor-pointer transition-all ${
+                              selectedGrade === grade 
+                                ? 'bg-orange-200 border-orange-500 shadow-lg' 
+                                : 'bg-white border-orange-200 hover:bg-orange-50'
+                            }`}
+                            onClick={() => {
+                              setSelectedGrade(grade);
+                              setShowRecommendation(true);
+                            }}
+                          >
+                            <label className="flex items-start cursor-pointer">
+                              <input
+                                type="radio"
+                                name="grade"
+                                value={grade}
+                                checked={selectedGrade === grade}
+                                onChange={() => {}}
+                                className="mt-1 mr-3"
+                              />
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2 mb-2">
+                                  <span className="font-bold text-xl text-orange-900">{grade}</span>
+                                  {grade === 'G4' && <AlertTriangle className="text-red-600" size={20} />}
+                                </div>
+                                <div className="text-sm text-gray-700 mb-1">
+                                  <strong>Descripción:</strong> {info.description}
+                                </div>
+                                <div className="text-sm text-blue-700 mb-2">
+                                  <strong>Acción ICI:</strong> {info.action}
+                                </div>
+                                {gradeRec && selectedGrade === grade && (
+                                  <div className="mt-3 bg-yellow-100 border-2 border-yellow-400 rounded-lg p-3">
+                                    <div className="flex items-start gap-2">
+                                      <span className="text-yellow-700 text-lg">🔬</span>
+                                      <div className="flex-1">
+                                        <div className="font-semibold text-yellow-900 text-sm mb-1">
+                                          Valores de Laboratorio:
+                                        </div>
+                                        <div className="text-sm text-gray-800 font-medium">
+                                          {gradeRec}
+                                        </div>
+                                        <div className="text-xs text-gray-600 mt-1">
+                                          LSN = Límite Superior de la Normalidad
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </label>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {showRecommendation && recommendation && (
+                  <Alert className="bg-gradient-to-r from-green-50 to-green-100 border-2 border-green-400">
+                    <AlertDescription>
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-3">
+                          <CheckCircle className="text-green-700" size={32} />
+                          <h3 className="font-bold text-2xl text-green-800">
+                            💊 Protocolo de Tratamiento
+                          </h3>
+                        </div>
+                        
+                        <div className="bg-white p-5 rounded-lg border-3 border-green-500 shadow-lg">
+                          <div className="flex items-center gap-2 mb-3">
+                            <Pill className="text-green-700" size={24} />
+                            <h4 className="font-bold text-lg text-green-900">Corticoides</h4>
+                          </div>
+                          <p className="text-xl font-bold text-green-900 mb-2">
+                            {recommendation.corticoid}
+                          </p>
+                          {recommendation.taper && (
+                            <p className="text-sm text-gray-600">
+                              <strong>Duración descenso:</strong> {recommendation.taper}
+                            </p>
+                          )}
+                        </div>
+
+                        {recommendation.labValues && (
+                          <div className="bg-yellow-50 p-4 rounded-lg border-2 border-yellow-400">
+                            <h4 className="font-bold mb-2 text-yellow-900">🔬 Valores de Laboratorio ({selectedGrade})</h4>
+                            <p className="text-sm font-semibold text-gray-800">{recommendation.labValues}</p>
+                            <p className="text-xs text-gray-600 mt-1">LSN = Límite Superior de la Normalidad</p>
+                          </div>
+                        )}
+
+                        <div className="bg-blue-50 p-4 rounded-lg border-2 border-blue-300">
+                          <h4 className="font-bold mb-2 text-blue-900">📋 Manejo Adicional</h4>
+                          <p className="text-sm">{recommendation.management}</p>
+                        </div>
+
+                        <div className="bg-purple-50 p-4 rounded-lg border-2 border-purple-300">
+                          <h4 className="font-bold mb-2 text-purple-900">🔬 Monitorización</h4>
+                          <p className="text-sm">{recommendation.monitoring}</p>
+                        </div>
+
+                        <div className="bg-orange-50 p-4 rounded-lg border-2 border-orange-300">
+                          <h4 className="font-bold mb-2 text-orange-900">💉 Decisión sobre Inmunoterapia</h4>
+                          <p className="text-sm font-semibold">{recommendation.ici}</p>
+                        </div>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                )}
+              </div>
+            )}
+
+            {mode === 'calculator' && (
+              <div className="space-y-4">
+                <button
+                  onClick={() => {
+                    setMode(null);
+                    setTaperSchedule(null);
+                  }}
+                  className="mb-4 px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
+                >
+                  ← Volver al menú principal
+                </button>
+
+                <Alert className="bg-purple-50 border-2 border-purple-300">
+                  <Calendar className="h-5 w-5" />
+                  <AlertDescription>
+                    <strong>Calculadora de Descenso de Corticoides</strong>
+                    <p className="text-sm mt-1">Distribución óptima: 50% desayuno, 35% comida, 15% cena</p>
+                  </AlertDescription>
+                </Alert>
+
+                <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-4 rounded-lg border-2 border-blue-300">
+                  <label className="block font-semibold mb-2">Peso del paciente (kg) - Opcional</label>
+                  <input
+                    type="number"
+                    value={patientWeight}
+                    onChange={(e) => setPatientWeight(e.target.value)}
+                    className="w-full p-3 border-2 border-blue-300 rounded-lg"
+                    placeholder="Peso en kg"
+                  />
+                  {patientWeight && (
+                    <div className="mt-3 space-y-1 text-sm bg-white p-3 rounded">
+                      <p><strong>Dosis orientativas de Prednisona según peso:</strong></p>
+                      <p>• 0.5 mg/kg = {(patientWeight * 0.5).toFixed(0)} mg/día (baja dosis)</p>
+                      <p>• 1 mg/kg = {(patientWeight * 1).toFixed(0)} mg/día (dosis media)</p>
+                      <p>• 2 mg/kg = {(patientWeight * 2).toFixed(0)} mg/día (dosis alta)</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-gradient-to-r from-green-50 to-green-100 p-4 rounded-lg border-2 border-green-300">
+                  <label className="block font-semibold mb-2">Dosis actual de Prednisona (mg)</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    <input
+                      type="number"
+                      placeholder="Desayuno"
+                      value={currentDose.breakfast}
+                      onChange={(e) => setCurrentDose({...currentDose, breakfast: e.target.value})}
+                      onBlur={calculateTotalDose}
+                      className="p-2 border-2 border-green-300 rounded"
+                    />
+                    <input
+                      type="number"
+                      placeholder="Comida"
+                      value={currentDose.lunch}
+                      onChange={(e) => setCurrentDose({...currentDose, lunch: e.target.value})}
+                      onBlur={calculateTotalDose}
+                      className="p-2 border-2 border-green-300 rounded"
+                    />
+                    <input
+                      type="number"
+                      placeholder="Cena"
+                      value={currentDose.dinner}
+                      onChange={(e) => setCurrentDose({...currentDose, dinner: e.target.value})}
+                      onBlur={calculateTotalDose}
+                      className="p-2 border-2 border-green-300 rounded"
+                    />
+                    <input
+                      type="number"
+                      placeholder="Total"
+                      value={currentDose.total}
+                      readOnly
+                      className="p-2 border-2 border-gray-300 rounded bg-gray-100 font-bold"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-gradient-to-r from-yellow-50 to-yellow-100 p-4 rounded-lg border-2 border-yellow-300">
+                    <label className="block font-semibold mb-2">Tiempo de descenso (semanas)</label>
+                    <input
+                      type="number"
+                      value={weeksToTaper}
+                      onChange={(e) => setWeeksToTaper(e.target.value)}
+                      className="w-full p-3 border-2 border-yellow-300 rounded-lg"
+                      placeholder="Ej: 8"
+                    />
+                  </div>
+
+                  <div className="bg-gradient-to-r from-orange-50 to-orange-100 p-4 rounded-lg border-2 border-orange-300">
+                    <label className="block font-semibold mb-2">Reducción semanal (mg)</label>
+                    <input
+                      type="number"
+                      value={weeklyReduction}
+                      onChange={(e) => setWeeklyReduction(e.target.value)}
+                      className="w-full p-3 border-2 border-orange-300 rounded-lg"
+                      placeholder="Ej: 5"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  onClick={calculateTaper}
+                  className="w-full p-4 bg-gradient-to-r from-purple-600 to-purple-700 text-white rounded-lg font-bold text-lg hover:from-purple-700 hover:to-purple-800 transition-all shadow-lg hover:shadow-xl"
+                >
+                  🧮 Calcular Calendario de Descenso
+                </button>
+
+                {taperSchedule && (
+                  <div className="space-y-4">
+                    <Alert className="bg-gradient-to-r from-blue-50 to-blue-100 border-2 border-blue-400">
+                      <AlertDescription>
+                        <div className="space-y-3">
+                          <h3 className="font-bold text-lg text-blue-900">📅 Calendario de Descenso Calculado</h3>
+                          
+                          <div className="bg-white p-3 rounded-lg">
+                            <label className="block font-semibold mb-2 text-gray-700">
+                              Selecciona el corticoide para visualizar:
+                            </label>
+                            <select
+                              value={selectedCorticoid}
+                              onChange={(e) => setSelectedCorticoid(e.target.value)}
+                              className="w-full p-3 border-2 border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                            >
+                              {Object.keys(corticoidEquivalence).map(corticoid => (
+                                <option key={corticoid} value={corticoid}>
+                                  {corticoidEquivalence[corticoid].name} ({corticoidEquivalence[corticoid].commercial})
+                                </option>
+                              ))}
+                            </select>
+                            <p className="text-xs text-gray-600 mt-2">
+                              {corticoidEquivalence[selectedCorticoid].availableDoses}
+                            </p>
+                          </div>
+
+                          <div className="space-y-3 max-h-96 overflow-y-auto">
+                            {taperSchedule.map(week => {
+                              const dist = week[selectedCorticoid];
+                              return (
+                                <div key={week.week} className="bg-white p-4 rounded-lg border-2 border-purple-300 shadow">
+                                  <h4 className="font-bold text-purple-900 mb-3">Semana {week.week}</h4>
+                                  <div className="grid grid-cols-4 gap-2 text-sm">
+                                    <div className="font-semibold bg-gray-100 p-2 rounded"></div>
+                                    <div className="font-semibold bg-yellow-50 p-2 rounded text-center">Desayuno</div>
+                                    <div className="font-semibold bg-orange-50 p-2 rounded text-center">Comida</div>
+                                    <div className="font-semibold bg-blue-50 p-2 rounded text-center">Cena</div>
+                                    
+                                    <div className="font-semibold bg-gray-100 p-2 rounded">Dosis</div>
+                                    <div className="bg-yellow-50 p-2 rounded text-center">{dist.breakfast.total} mg</div>
+                                    <div className="bg-orange-50 p-2 rounded text-center">{dist.lunch.total} mg</div>
+                                    <div className="bg-blue-50 p-2 rounded text-center">{dist.dinner.total} mg</div>
+                                    
+                                    <div className="font-semibold bg-gray-100 p-2 rounded">Comprimidos</div>
+                                    <div className="bg-yellow-50 p-2 rounded text-center text-xs">{dist.breakfast.pills.join(' + ')}</div>
+                                    <div className="bg-orange-50 p-2 rounded text-center text-xs">{dist.lunch.pills.join(' + ')}</div>
+                                    <div className="bg-blue-50 p-2 rounded text-center text-xs">{dist.dinner.pills.join(' + ')}</div>
+                                  </div>
+                                  <p className="text-right mt-2 font-bold text-purple-900">
+                                    Total diario: {dist.actualTotal.toFixed(1)} mg
+                                  </p>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-4 rounded-lg border-2 border-blue-300 mt-4">
+                            <h4 className="font-bold text-blue-900 mb-3">📄 Exportar Calendario</h4>
+                            <p className="text-sm text-gray-700 mb-4">
+                              Descarga el calendario de descenso para compartir con el paciente o editar según necesites
+                            </p>
+                            {!librariesLoaded && (
+                              <p className="text-xs text-orange-600 mb-3">
+                                ⏳ Cargando librerías de generación...
+                              </p>
+                            )}
+                            <div className="grid grid-cols-2 gap-3">
+                              <button
+                                onClick={generatePDF}
+                                disabled={!librariesLoaded}
+                                className={`flex items-center justify-center gap-2 p-3 rounded-lg font-semibold transition-all shadow-md ${
+                                  librariesLoaded 
+                                    ? 'bg-red-600 text-white hover:bg-red-700 hover:shadow-lg cursor-pointer' 
+                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                }`}
+                              >
+                                <span>📄</span>
+                                Descargar PDF
+                              </button>
+                              <button
+                                onClick={generateWordDoc}
+                                disabled={!librariesLoaded}
+                                className={`flex items-center justify-center gap-2 p-3 rounded-lg font-semibold transition-all shadow-md ${
+                                  librariesLoaded 
+                                    ? 'bg-blue-600 text-white hover:bg-blue-700 hover:shadow-lg cursor-pointer' 
+                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                }`}
+                              >
+                                <span>📝</span>
+                                Descargar Word
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </AlertDescription>
+                    </Alert>
+
+                    <Alert className="bg-red-50 border-2 border-red-400">
+                      <AlertDescription>
+                        <div className="space-y-2">
+                          <h4 className="font-bold text-red-900">⚠️ TRATAMIENTO PROFILÁCTICO OBLIGATORIO (en caso de empleo de corticoides):</h4>
+                          <ul className="text-sm space-y-1 ml-4">
+                            <li>• <strong>Omeprazol</strong> 20-40 mg/día en ayunas durante TODO el tratamiento</li>
+                            <li>• <strong>Septrim Forte</strong> 1 comprimido: Lunes - Miércoles - Viernes (si prednisona ≥20 mg/día durante >4 semanas)</li>
+                            <li>• <strong>Calcio</strong> 1200 mg/día + Vitamina D 800-2000 UI/día</li>
+                          </ul>
+                          <p className="text-sm font-bold text-red-900 mt-3">
+                            ❌ NUNCA suspender bruscamente el tratamiento corticoideo
+                          </p>
+                        </div>
+                      </AlertDescription>
+                    </Alert>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+export default ToxicityManagementSystem;
